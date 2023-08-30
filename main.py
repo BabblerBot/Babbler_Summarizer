@@ -6,15 +6,22 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
 app = FastAPI()
 
-@app.get("/get_summary/{url:path}")
-async def get_summary(url: str):
-    print("GPU: ",torch.cuda.is_available())
+
+@app.get("/get_summary/{book_id}")
+async def get_summary(book_id: str):
+    print("GPU: ", torch.cuda.is_available())
+    url = get_url(book_id)
     docs = get_chunks(url)
     summary = generate_summary(docs)
     return {"summary": summary}
 
 if __name__ == "__main__":
-    uvicorn.run("main:app")
+    uvicorn.run("main:app", reload=True)
+
+
+def get_url(book_id):
+    return f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt"
+
 
 # fetch ebook and split into chunks (docs)
 def get_chunks(url):
