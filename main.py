@@ -20,7 +20,7 @@ if __name__ == "__main__":
 def get_chunks(url):
     loader = GutenbergLoader(url)
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=10000, 
+        chunk_size=50000, 
         chunk_overlap=300, 
         separators=["\r\n\n\n\r\n\n\n", "\r\n\n\n", "."]
     )
