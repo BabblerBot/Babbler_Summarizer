@@ -3,6 +3,10 @@ from langchain.document_loaders import GutenbergLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+import uvicorn
+from typing import List
+
+MODEL = "pszemraj/led-base-book-summary"
 
 app = FastAPI()
 
@@ -14,6 +18,7 @@ async def get_summary(book_id: str):
     docs = get_chunks(url)
     summary = generate_summary(docs)
     return {"summary": summary}
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", reload=True)
@@ -27,11 +32,11 @@ def get_url(book_id):
 def get_chunks(url):
     loader = GutenbergLoader(url)
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=50000, 
-        chunk_overlap=300, 
-        separators=["\r\n\n\n\r\n\n\n", "\r\n\n\n", "."]
+        chunk_size=50000,
+        chunk_overlap=300,
+        separators=["\r\n\n\n\r\n\n\n", "\r\n\n\n", "."],
     )
-    
+
     text = loader.load()[0].page_content
 
     # remove PROJECT GUTENBERG header and footer sections
@@ -39,7 +44,7 @@ def get_chunks(url):
     end_marker = "*** END OF THE PROJECT GUTENBERG EBOOK"
     start_index = text.find(start_marker)
     end_index = text.find(end_marker)
-    text = text[start_index + len(start_marker):end_index]
+    text = text[start_index + len(start_marker) : end_index]
 
     # splitting
     docs = text_splitter.create_documents([text])
@@ -48,20 +53,21 @@ def get_chunks(url):
     print("created %d chunks." % len(docs))
     return docs
 
+
 def generate_summary(docs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = AutoTokenizer.from_pretrained("pszemraj/led-large-book-summary")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL)
     model = AutoModelForSeq2SeqLM.from_pretrained(
-                "pszemraj/led-large-book-summary", 
-                # load_in_8bit=True,
-                #low_cpu_mem_usage=True,
+        MODEL,
+        # load_in_8bit=True,
+        # low_cpu_mem_usage=True,
     ).to(device)
     summarizer = pipeline(
-        task = "summarization",
-        model = model,
-        tokenizer = tokenizer,
-        pad_token_id = tokenizer.eos_token_id,
-        max_length = 300,
+        task="summarization",
+        model=model,
+        tokenizer=tokenizer,
+        pad_token_id=tokenizer.eos_token_id,
+        max_length=300,
         # temperature = 0.2,
         device=device,
     )
@@ -71,31 +77,33 @@ def generate_summary(docs):
     initial_summary = ""
     for i in range(len(docs)):
         chunk_summary = summarizer(
-                docs[i].page_content,
-                min_length=400,
-                max_length=1000,
-                no_repeat_ngram_size=3,
-                encoder_no_repeat_ngram_size=3,
-                repetition_penalty=3.5,
-                num_beams=4,
-                early_stopping=True,
-            )[0]['summary_text']
-        print("chunk %d summerized." %i)
+            docs[i].page_content,
+            min_length=100,
+            max_length=300,
+            no_repeat_ngram_size=3,
+            encoder_no_repeat_ngram_size=3,
+            repetition_penalty=3.5,
+            num_beams=4,
+            early_stopping=True,
+        )[0]["summary_text"]
+        print("chunk %d summerized." % i)
         # chunk_summaries[i]= chunk_summary
-        initial_summary += (chunk_summary + "\n")
+        initial_summary += chunk_summary + "\n"
+        # for now just send the first summary
+        # return initial_summary
     print("Chunk summarization completed.")
 
     print("Generating final summary")
     summary = summarizer(
-                initial_summary,
-                min_length=500,
-                max_length=1200,
-                no_repeat_ngram_size=3,
-                encoder_no_repeat_ngram_size=3,
-                repetition_penalty=3.5,
-                num_beams=4,
-                early_stopping=True,
-            )[0]['summary_text']
+        initial_summary,
+        min_length=100,
+        max_length=300,
+        no_repeat_ngram_size=3,
+        encoder_no_repeat_ngram_size=3,
+        repetition_penalty=3.5,
+        num_beams=4,
+        early_stopping=True,
+    )[0]["summary_text"]
     print("Final summary generated.")
     # summary = summarizer(
     #     docs[1].page_content,
