@@ -7,7 +7,7 @@ The books will be fetched from the [Project Gutenberg site.](https://www.gutenbe
 ## General Architecture
 
 The following image shows the abstract architecture of the Summarizer.
-![architecture](https://drive.google.com/file/d/1s-GbolPtbKfKU8Y-WY4jXWj6gebfZ1qn/view?usp=sharing)
+![architecture](https://drive.google.com/uc?id=/1s-GbolPtbKfKU8Y-WY4jXWj6gebfZ1qn)
 
 Given the extensive length of books, it becomes essential to split them into smaller chunks to meet the token limitations imposed by available models.
 We are currently exploring various techniques to optimize the summarization process and attain the highest-quality summaries.
