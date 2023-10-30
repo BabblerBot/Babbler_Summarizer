@@ -17,11 +17,12 @@ def create_database():
 
 
 def get_summary_from_db(book_id):
+    create_database()
     conn = sqlite3.connect("summary_cache.db")
     cursor = conn.cursor()
     cursor.execute("SELECT summary FROM summaries WHERE book_id=?", (book_id,))
     result = cursor.fetchone()
-    summary = result[0] if result else None
+    summary = result if result else None
     conn.close()
     return summary
 

@@ -1,8 +1,13 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+from langchain.llms import Replicate
+from dotenv import load_dotenv
+from utils import get_title
+
+load_dotenv()
 
 
-def generate_summary(docs, model_string: str):
+def generate_summary(docs, model_string: str, use_llm=False, book_id=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = AutoTokenizer.from_pretrained(model_string)
     model = AutoModelForSeq2SeqLM.from_pretrained(
@@ -40,28 +45,41 @@ def generate_summary(docs, model_string: str):
         # for now just send the first summary
         # return initial_summary
     print("Chunk summarization completed.")
+    print("Tokensize of Chunk Summaries", len(tokenizer.encode(initial_summary)))
+    if use_llm:
+        print("Using LLM to generate final summary...")
+        llm = Replicate(
+            model="meta/llama-2-70b-chat:02e509c789964a7ea8736978a43525956ef40397be9033abf9fd2badfe68c9e3",
+            input={
+                "temperature": 0.75,
+                "max_new_tokens": 500,
+                "top_p": 0.95,
+                "repetition_penalty": 1.15,
+            },
+        )
+        title = get_title(book_id)
+        prompt = f"""Given the following book title and chunk summaries, generate a 200-400 word summary of the book using 
+                     your knowledge of the book title and if needed, the chunk summaries. 
+                    
+                    Book Title: {title}
+                     
+                    Chunk Summaries: \n {initial_summary}
 
-    print("Generating final summary")
-    summary = summarizer(
-        initial_summary,
-        min_length=100,
-        max_length=300,
-        no_repeat_ngram_size=3,
-        encoder_no_repeat_ngram_size=3,
-        repetition_penalty=3.5,
-        num_beams=4,
-        early_stopping=True,
-    )[0]["summary_text"]
+                    Your Summary:                    
+                    """
+        summary = llm(prompt)
+
+    else:
+        print("Generating final summary...")
+        summary = summarizer(
+            initial_summary,
+            min_length=100,
+            max_length=300,
+            no_repeat_ngram_size=3,
+            encoder_no_repeat_ngram_size=3,
+            repetition_penalty=3.5,
+            num_beams=4,
+            early_stopping=True,
+        )[0]["summary_text"]
     print("Final summary generated.")
-    # summary = summarizer(
-    #     docs[1].page_content,
-    #     # final_summary,
-    #     min_length=200,
-    #     max_length=400,
-    #     no_repeat_ngram_size=3,
-    #     encoder_no_repeat_ngram_size=3,
-    #     repetition_penalty=3.5,
-    #     num_beams=4,
-    #     early_stopping=True,
-    # )[0]['summary_text']
     return summary

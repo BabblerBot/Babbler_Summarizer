@@ -16,3 +16,4 @@ transformers==4.32.1
 uvicorn==0.23.2
 nest-asyncio==1.5.8
 pyngrok==7.0.0
+replicate==0.15.5

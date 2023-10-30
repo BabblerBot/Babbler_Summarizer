@@ -1,9 +1,14 @@
 from langchain.document_loaders import GutenbergLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from requests import get
 
 
 def get_url(book_id):
     return f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt"
+
+
+def get_title(book_id):
+    return get(f"https://gutendex.com/books/{book_id}").json()["title"]
 
 
 # fetch ebook and split into chunks (docs)
