@@ -6,9 +6,11 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 import uvicorn
 from typing import List
 import sqlite3
+import re
 
 MODEL = "pszemraj/led-base-book-summary"
-USE_CACHE = True
+TOKENIZER = AutoTokenizer.from_pretrained(MODEL)
+USE_CACHE = False
 
 app = FastAPI()
 
@@ -31,7 +33,8 @@ async def get_summary(book_id: str):
         print("Summary is not available in cache")
         print("GPU: ", torch.cuda.is_available())
         url = get_url(book_id)
-        docs = get_chunks(url)
+        text = load_book(url)
+        docs = split_doc(text)
         summary = generate_summary(docs)
         # add summary to database if not exist
         if result == None:
@@ -63,36 +66,67 @@ def get_url(book_id):
     return f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt"
 
 
-# fetch ebook and split into chunks (docs)
-def get_chunks(url):
+def load_book(url):
     loader = GutenbergLoader(url)
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=50000,
-        chunk_overlap=300,
-        separators=["\r\n\n\n\r\n\n\n", "\r\n\n\n", "."],
-    )
-
     text = loader.load()[0].page_content
 
     # remove PROJECT GUTENBERG header and footer sections
-    start_marker = "*** START OF THE PROJECT GUTENBERG EBOOK"
-    end_marker = "*** END OF THE PROJECT GUTENBERG EBOOK"
-    start_index = text.find(start_marker)
-    start_end_index = text.find("***", start_index + len(start_marker))
-    end_index = text.find(end_marker)
-    text = text[start_end_index + 3 : end_index]
+    start_marker = re.search(r"\*\*\* START OF THE PROJECT GUTENBERG EBOOK (.*?)\*\*\*", text)
+    end_marker = re.search(r"\*\*\* END OF THE PROJECT GUTENBERG EBOOK", text)
+    if (start_marker != None) and (end_marker != None) :
+        start_index = start_marker.end()
+        end_index = end_marker.start()
+        text = text[start_index : end_index]
+    return text
 
-    # splitting
-    docs = text_splitter.create_documents([text])
-    for i in range(len(docs)):
-        docs[i].page_content = docs[i].page_content.replace("\r\n\n\n", " ")
-    print("created %d chunks." % len(docs))
-    return docs
 
+def split_doc(text):
+    chapter_headings =  r"(?i)(?:chapter|section|part|episode|book)\s+[IVXLCDM]+\b.|\b(?:chapter|section|part|episode|book)\s+\d+\b."
+    text_splitter = RecursiveCharacterTextSplitter(
+        separators=['\r\n\n\n\r\n\n\n','. '],
+        chunk_size = 40000,
+        length_function = len,
+    )
+    chapters = []
+    matches = list(re.finditer(chapter_headings, text))
+    
+    # if chapter headings found split in to chapters
+    if matches:
+        print("chapter headings found.")
+        heading_ids = []
+        matched_headings = []
+        for match in matches:
+            # print(match)
+            if match.group(0).lower() != "book i":
+                matched_headings.append(match.group(0))
+                heading_ids.append((match.start(),match.end()))
+        heading_ids.append((-1,-1))
+        
+        removed = []
+        for i in range(len(matched_headings)):
+            chapter = text[heading_ids[i][1]:heading_ids[i+1][0]]
+            chapter = re.sub(r'\s+', ' ', chapter).strip() # remove unnecessary white spaces
+            if len(chapter) < 400:
+                removed.append(chapter)
+                continue
+            if get_token_size(chapter) > 16000:
+                print("chapter tokens exceed 16000. Spliting chapter again.")
+                chapter = text_splitter.create_documents([chapter])
+                chapter = [chap.page_content.replace('\r\n\n\n',' ') for chap in chapter]
+                chapters.extend(chapter)
+                continue
+            chapters.append(chapter.replace('\r\n\n\n',' '))
+    # if no chapter heading found split the text randomly.
+    else:
+        chapter = text_splitter.create_documents([text])
+        chapter = [chap.page_content.replace('\r\n\n\n',' ') for chap in chapter]
+        chapters.extend(chapter)
+    print(f"number of splits: {len(chapters)}")   
+    return chapters
 
 def generate_summary(docs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL)
+    tokenizer = TOKENIZER
     model = AutoModelForSeq2SeqLM.from_pretrained(
         MODEL,
         # load_in_8bit=True,
@@ -113,7 +147,7 @@ def generate_summary(docs):
     initial_summary = ""
     for i in range(len(docs)):
         chunk_summary = summarizer(
-            docs[i].page_content,
+            docs[i],
             min_length=100,
             max_length=300,
             no_repeat_ngram_size=3,
@@ -153,3 +187,7 @@ def generate_summary(docs):
     #     early_stopping=True,
     # )[0]['summary_text']
     return summary
+
+
+def get_token_size(text):
+    return len(TOKENIZER.encode(text))
