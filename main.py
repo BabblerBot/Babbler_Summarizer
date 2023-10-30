@@ -75,11 +75,12 @@ def get_chunks(url):
     text = loader.load()[0].page_content
 
     # remove PROJECT GUTENBERG header and footer sections
-    start_marker = "***\r\n\n\n\r\n\n\n\r\n\n\n\r\n\n\n\r\n\n\n"
+    start_marker = "*** START OF THE PROJECT GUTENBERG EBOOK"
     end_marker = "*** END OF THE PROJECT GUTENBERG EBOOK"
     start_index = text.find(start_marker)
+    start_end_index = text.find("***", start_index + len(start_marker))
     end_index = text.find(end_marker)
-    text = text[start_index + len(start_marker) : end_index]
+    text = text[start_end_index + 3 : end_index]
 
     # splitting
     docs = text_splitter.create_documents([text])
