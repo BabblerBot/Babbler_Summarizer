@@ -10,7 +10,7 @@ import re
 
 MODEL = "pszemraj/led-base-book-summary"
 TOKENIZER = AutoTokenizer.from_pretrained(MODEL)
-USE_CACHE = False
+USE_CACHE = True
 
 app = FastAPI()
 
@@ -35,7 +35,7 @@ async def get_summary(book_id: str):
         url = get_url(book_id)
         text = load_book(url)
         docs = split_doc(text)
-        summary = generate_summary(docs)
+        summary = get_final_summary(docs)
         # add summary to database if not exist
         if result == None:
             cursor.execute("INSERT INTO summaries (book_id, summary) VALUES(?,?)", (book_id, summary))
@@ -62,6 +62,9 @@ def create_database():
     conn.close()
 
 
+def get_token_size(text):
+    return len(TOKENIZER.encode(text))
+
 def get_url(book_id):
     return f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt"
 
@@ -79,7 +82,7 @@ def load_book(url):
         text = text[start_index : end_index]
     return text
 
-
+# try to split document into chapters. if not split randomly
 def split_doc(text):
     chapter_headings =  r"(?i)(?:chapter|section|part|episode|book)\s+[IVXLCDM]+\b.|\b(?:chapter|section|part|episode|book)\s+\d+\b."
     text_splitter = RecursiveCharacterTextSplitter(
@@ -124,70 +127,78 @@ def split_doc(text):
     print(f"number of splits: {len(chapters)}")   
     return chapters
 
-def generate_summary(docs):
+# generate a summary for list of text inputs
+def generate_summary(docs, max_summary_len):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = TOKENIZER
+    tokenizer = AutoTokenizer.from_pretrained(MODEL)
     model = AutoModelForSeq2SeqLM.from_pretrained(
         MODEL,
         # load_in_8bit=True,
         # low_cpu_mem_usage=True,
     ).to(device)
+    
     summarizer = pipeline(
         task="summarization",
         model=model,
         tokenizer=tokenizer,
         pad_token_id=tokenizer.eos_token_id,
-        max_length=300,
         # temperature = 0.2,
         device=device,
     )
 
+    max_chunk_sum_len = max_summary_len // len(docs)
+    if max_chunk_sum_len <= 150:
+        max_chunk_sum_len = 200
+        
+    chunk_sums = []
+    summary = ""
+    
     print("Starting chunk summarization...")
-    # chunk_summaries = {}
-    initial_summary = ""
+    
     for i in range(len(docs)):
-        chunk_summary = summarizer(
-            docs[i],
-            min_length=100,
-            max_length=300,
-            no_repeat_ngram_size=3,
-            encoder_no_repeat_ngram_size=3,
-            repetition_penalty=3.5,
-            num_beams=4,
-            early_stopping=True,
-        )[0]["summary_text"]
-        print("chunk %d summerized." % i)
-        # chunk_summaries[i]= chunk_summary
-        initial_summary += chunk_summary + "\n"
-        # for now just send the first summary
-        # return initial_summary
+        if len(tokenizer.encode(docs[i])) < max_chunk_sum_len:
+            print("chunk %d summerization skiped." % i)
+            chunk_summary = docs[i]
+
+        else:
+            chunk_summary = summarizer(
+                docs[i],
+                min_length=150,
+                max_length=max_chunk_sum_len,
+                no_repeat_ngram_size=3,
+                encoder_no_repeat_ngram_size=3,
+                repetition_penalty=3.5,
+                num_beams=4,
+                # early_stopping=True,
+            )[0]["summary_text"]
+            print("chunk %d summerized." % i)
+
+            
+        chunk_sums.append(chunk_summary)
+        summary += (chunk_summary + ". ")
+
     print("Chunk summarization completed.")
+    print(f"Length:\t\t{len(summary)}\nToken size:\t\t{len(tokenizer.encode(summary))}")
 
-    print("Generating final summary")
-    summary = summarizer(
-        initial_summary,
-        min_length=100,
-        max_length=300,
-        no_repeat_ngram_size=3,
-        encoder_no_repeat_ngram_size=3,
-        repetition_penalty=3.5,
-        num_beams=4,
-        early_stopping=True,
-    )[0]["summary_text"]
-    print("Final summary generated.")
-    # summary = summarizer(
-    #     docs[1].page_content,
-    #     # final_summary,
-    #     min_length=200,
-    #     max_length=400,
-    #     no_repeat_ngram_size=3,
-    #     encoder_no_repeat_ngram_size=3,
-    #     repetition_penalty=3.5,
-    #     num_beams=4,
-    #     early_stopping=True,
-    # )[0]['summary_text']
-    return summary
+    return summary, chunk_sums
 
 
-def get_token_size(text):
-    return len(TOKENIZER.encode(text))
+def get_final_summary(docs):
+    # iteration 01
+    initial_summary, initial_chunk_sums =generate_summary(docs,20000)
+
+    # iteration 02
+    to_summarize = []
+    for i in range(0,len(initial_chunk_sums)-1,2):
+        to_summarize.append(initial_chunk_sums[i]+" "+initial_chunk_sums[i+1])
+    if len(initial_chunk_sums)%2:
+        to_summarize.append(initial_chunk_sums[-1])
+    second_summary, _ =generate_summary(to_summarize,6000)
+
+    # iteration 03
+    third_summary, _ =generate_summary([second_summary],1200)
+
+    # iteration 03
+    final_summary, _ =generate_summary([third_summary],400)
+
+    return final_summary
