@@ -7,6 +7,26 @@ from utils import get_title
 load_dotenv()
 
 
+def half_summarize(curr_sum, summarizer, tokenizer, target_size):
+    curr_len = len(tokenizer.encode(curr_sum))
+    print("Target Token Size", target_size)
+    while curr_len > target_size:
+        print("Current Token Size", curr_len)
+        curr_sum = summarizer(
+            curr_sum,
+            min_length=min(target_size, 100),
+            max_length=min(target_size, curr_len // 2),
+            no_repeat_ngram_size=3,
+            encoder_no_repeat_ngram_size=3,
+            repetition_penalty=3.5,
+            num_beams=4,
+            early_stopping=True,
+        )[0]["summary_text"]
+        curr_len = len(tokenizer.encode(curr_sum))
+
+    return curr_sum
+
+
 def generate_summary(docs, model_string: str, use_llm=False, book_id=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = AutoTokenizer.from_pretrained(model_string)
@@ -45,8 +65,14 @@ def generate_summary(docs, model_string: str, use_llm=False, book_id=None):
         # for now just send the first summary
         # return initial_summary
     print("Chunk summarization completed.")
-    print("Tokensize of Chunk Summaries", len(tokenizer.encode(initial_summary)))
+    init_sum_len = len(tokenizer.encode(initial_summary))
+    print("Tokensize of Chunk Summaries", init_sum_len)
     if use_llm:
+        if init_sum_len > 4000:
+            print("Chunk Summaries too long, truncating...")
+            initial_summary = half_summarize(
+                initial_summary, summarizer, tokenizer, 4000
+            )
         print("Using LLM to generate final summary...")
         llm = Replicate(
             model="meta/llama-2-70b-chat:02e509c789964a7ea8736978a43525956ef40397be9033abf9fd2badfe68c9e3",
@@ -70,6 +96,11 @@ def generate_summary(docs, model_string: str, use_llm=False, book_id=None):
         summary = llm(prompt)
 
     else:
+        if init_sum_len > 16000:
+            print("Chunk Summaries too long, truncating...")
+            initial_summary = half_summarize(
+                initial_summary, summarizer, tokenizer, 8000
+            )
         print("Generating final summary...")
         summary = summarizer(
             initial_summary,
