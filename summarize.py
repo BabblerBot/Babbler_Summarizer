@@ -85,7 +85,7 @@ def generate_summary(docs, model_string: str, use_llm=False, book_id=None):
         )
         title = get_title(book_id)
         prompt = f"""Given the following book title and chunk summaries, generate a 200-400 word summary of the book using 
-                     your knowledge of the book title and if needed, the chunk summaries. 
+                     the chunk summaries. 
                     
                     Book Title: {title}
                      
